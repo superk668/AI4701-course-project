@@ -117,20 +117,16 @@ def _canvas_layout(frames, H_to_ref):
 
 
 def _hard_paste(frames, H_to_ref):
-    """First-come-first-served paste: sharpest, leaves visible frame edges.
-
-    Returns a BGRA image with alpha=0 outside any frame, alpha=255 inside.
-    """
+    """First-come-first-served paste: sharpest, leaves visible frame edges."""
     n, offset, cw, ch = _canvas_layout(frames, H_to_ref)
-    canvas = np.zeros((ch, cw, 4), dtype=np.uint8)
+    canvas = np.full((ch, cw, 3), 255, dtype=np.uint8)
     occupied = np.zeros((ch, cw), dtype=bool)
     for k in range(n):
         Hk = offset @ H_to_ref[k]
         warped = cv2.warpPerspective(frames[k], Hk, (cw, ch))
         mask = warped.sum(axis=2) > 0
         write = mask & ~occupied
-        canvas[write, :3] = warped[write]
-        canvas[write, 3] = 255
+        canvas[write] = warped[write]
         occupied |= mask
     return canvas
 
@@ -142,8 +138,6 @@ def _feather_blend(frames, H_to_ref, feather_px):
     bilinear halo, then a distance transform capped at `feather_px` is used
     as the blend weight -- giving a soft ramp of `feather_px` width at each
     frame's edge and a flat plateau in its interior.
-
-    Returns a BGRA image with alpha=0 outside any frame, alpha=255 inside.
     """
     n, offset, cw, ch = _canvas_layout(frames, H_to_ref)
     acc = np.zeros((ch, cw, 3), dtype=np.float32)
@@ -164,10 +158,9 @@ def _feather_blend(frames, H_to_ref, feather_px):
         acc += warped.astype(np.float32) * weight[..., None]
         wsum += weight
 
-    out = np.zeros((ch, cw, 4), dtype=np.uint8)
+    out = np.full((ch, cw, 3), 255, dtype=np.uint8)
     valid = wsum > 1e-6
-    out[valid, :3] = (acc[valid] / wsum[valid, None]).clip(0, 255).astype(np.uint8)
-    out[valid, 3] = 255
+    out[valid] = (acc[valid] / wsum[valid, None]).clip(0, 255).astype(np.uint8)
     return out
 
 
@@ -228,7 +221,7 @@ def main():
         print(f"\n=== {name} ===")
         pano, dt, n_in, n_chained = stitch_video(
             p, feather_px=args.feather, num_samples=args.frames)
-        out = os.path.join(args.out_dir, f"{name}_pano.png")
+        out = os.path.join(args.out_dir, f"{name}_pano.jpg")
         cv2.imwrite(out, pano)
         print(f"  chained {n_chained}/{n_in} frames, canvas={pano.shape[1]}x{pano.shape[0]}, "
               f"feather={args.feather}, frames={args.frames}, {dt:.2f}s")
