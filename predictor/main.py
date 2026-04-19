@@ -3,7 +3,7 @@ from predictor import Predictor
 
 def main():
     # 模型加载
-    model_path = r"runs\detect\runs\detect\train_20260419_220642\weights\best.pt"
+    model_path = r"predictor\best.pt"
     model = YOLO(model_path)
     
     # 初始化预测器
