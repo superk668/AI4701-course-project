@@ -1,0 +1,18 @@
+# requirements.txt
+
+# YOLO框架
+ultralytics>=8.0.0
+
+# 深度学习框架
+torch>=1.9.0
+torchvision>=0.10.0
+
+# 图像处理
+opencv-python>=4.5.0
+numpy>=1.19.0
+
+# 路径处理
+pathlib
+
+# 可选（如果需要GPU加速）
+cudatoolkit>=11.0  # CUDA版本根据您的GPU选择
