@@ -1,51 +1,148 @@
-# AI4701-course-project
+# AI4701 HW4 Counting Package
 
-## Video panorama stitcher (`stitch.py`)
+This branch packages the current best-performing screw-counting pipeline for
+video-level inference.
 
-Samples frames from a video, chains ORB+RANSAC homographies, and composites
-them into a single panorama.
+## Repository Layout
 
-### Command line
-
-```bash
-# stitch every video in test_videos/ with default settings (feather=0, frames=10)
-python stitch.py
-
-# feather-blend all videos with a 20 px ramp
-python stitch.py --feather 20
-
-# stitch a single video with a custom feather width and frame count
-python stitch.py path/to/video.mov --feather 30 --frames 15
+```text
+AI4701-course-project/
+├── code/
+│   ├── count_instances.py
+│   ├── generate_video_stress_tests.py
+│   ├── train_counting_seg.py
+│   └── visualize_homography_alignment.py
+├── model/
+│   └── best.pt
+├── requirements.txt
+└── README.md
 ```
 
-Flags:
+## What This Package Does
 
-- `video` (positional, optional): single video file. If omitted, every
-  `.mov`/`.mp4` under `test_videos/` is processed.
-- `--feather INT`: edge feather width in pixels. `0` = hard paste (sharpest,
-  may show polygonal seams); `>0` = distance-transform feather blend of that
-  ramp width. Default `0`.
-- `--frames INT`: number of frames uniformly sampled from the video and fed
-  into the stitching chain. Default `10`.
-- `--out_dir DIR`: output directory for `{name}_pano.jpg`. Default `pano_out`.
+The core counting logic lives in `code/count_instances.py`.
 
-### Library usage
+It supports:
 
-`stitch_video` is the single entry point:
+- YOLOv8 segmentation inference on sampled video frames
+- homography-based global coordinate alignment
+- cross-frame deduplication
+- final five-class screw counting
+
+It does **not** write `result.npy`, `time.txt`, or mask images by itself.
+Those are expected to be handled by an external `run.py` or other caller.
+
+## Main Python API
+
+The two recommended interfaces are:
+
+### 1. Count all videos in a folder
 
 ```python
-from stitch import stitch_video
+from pathlib import Path
+import sys
 
-pano, dt, n_sampled, n_chained = stitch_video(
-    "test_videos/clip.mov",
-    feather_px=20,     # 0 = hard paste, >0 = feather-blend ramp width
-    num_samples=12,    # how many frames to extract and use
+repo_root = Path("/path/to/AI4701-course-project")
+sys.path.insert(0, str(repo_root / "code"))
+
+from count_instances import count_videos_in_directory
+
+result_dict = count_videos_in_directory(
+    data_dir=repo_root / "test_videos",
+    model_path=repo_root / "model" / "best.pt",
+    device="0",          # or "cpu"
+    max_frames=300,
+    frame_stride=10,
 )
 
-import cv2
-cv2.imwrite("clip_pano.jpg", pano)
+print(result_dict)
 ```
 
-Returns `(pano, elapsed_seconds, n_sampled, n_chained)`. `n_chained` equals
-`n_sampled` on success; it will be smaller if the homography chain was cut
-early because a pair failed to match.
+Return format:
+
+```python
+{
+    "IMG_2374": [14, 7, 6, 22, 3],
+    "IMG_2375": [15, 9, 9, 17, 4],
+    "IMG_2376": [15, 5, 6, 12, 4],
+}
+```
+
+- key: video filename without suffix
+- value: length-5 list in the fixed order
+  `[Type1, Type2, Type3, Type4, Type5]`
+
+If detailed per-video summaries are needed:
+
+```python
+result_dict, summaries = count_videos_in_directory(
+    data_dir=repo_root / "test_videos",
+    model_path=repo_root / "model" / "best.pt",
+    return_summaries=True,
+)
+```
+
+### 2. Count a single video
+
+```python
+from pathlib import Path
+import sys
+
+repo_root = Path("/path/to/AI4701-course-project")
+sys.path.insert(0, str(repo_root / "code"))
+
+from count_instances import count_single_video
+
+summary = count_single_video(
+    video_path=repo_root / "test_videos" / "IMG_2374.MOV",
+    model_path=repo_root / "model" / "best.pt",
+    device="0",
+)
+
+counts = summary["total_counts"]
+print(counts)
+```
+
+## Common Parameters
+
+Useful parameters exposed by the API:
+
+- `model_path`: weight path, typically `model/best.pt`
+- `device`: `"0"` for GPU 0, or `"cpu"`
+- `max_frames`: max number of frames to process, default `300`
+- `frame_stride`: sampled-frame stride, default `10`
+- `imgsz`: YOLO inference image size, default `960`
+- `conf`: confidence threshold, default `0.25`
+- `iou`: NMS IoU threshold, default `0.7`
+
+## How External `run.py` Should Save `result.npy`
+
+This package only returns Python objects. A caller can save the final result as:
+
+```python
+import numpy as np
+from pathlib import Path
+
+result_dict = {
+    "IMG_2374": [14, 7, 6, 22, 3],
+    "IMG_2375": [15, 9, 9, 17, 4],
+}
+
+output_path = Path("result.npy")
+with output_path.open("wb") as handle:
+    np.save(handle, result_dict, allow_pickle=True)
+```
+
+The grader should then be able to load it using:
+
+```python
+result = np.load("result.npy", allow_pickle=True).item()
+```
+
+## Notes
+
+- `model/best.pt` is the current best-performing model kept for submission use.
+- `code/train_counting_seg.py` is for training and is not required during test-time inference.
+- `code/generate_video_stress_tests.py` and
+  `code/visualize_homography_alignment.py` are auxiliary scripts and are included
+  because the request was to package all Python files currently under `HW4/code`.
